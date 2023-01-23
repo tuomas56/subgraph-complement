@@ -21,6 +21,19 @@ impl<N, E, Ty: petgraph::EdgeType> GraphLike for petgraph::Graph<N, E, Ty> {
     }
 }
 
+#[cfg(feature = "petgraph")]
+impl<N, E, Ty: petgraph::EdgeType> GraphLike for petgraph::stable_graph::StableGraph<N, E, Ty> {
+    type Vertex = petgraph::stable_graph::NodeIndex;
+    
+    fn vertices(&self) -> Vec<Self::Vertex> {
+        self.node_indices().collect()
+    }
+
+    fn has_edge(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
+        self.contains_edge(a, b)
+    }
+}
+
 pub struct Graph<G: GraphLike> {
     map: Vec<G::Vertex>,
     xadj: Vec<sys::idx_t>,
@@ -106,6 +119,13 @@ impl Default for Options {
             sys::METIS_SetDefaultOptions(options.as_mut_ptr());
         }
         Options { options }
+    }
+}
+
+impl Options {
+    pub fn max_imbalance(mut self, factor: usize) -> Self {
+        self.options[sys::moptions_et_METIS_OPTION_UFACTOR as usize] = factor as sys::idx_t;
+        self
     }
 }
 

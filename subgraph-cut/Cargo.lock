@@ -789,6 +789,7 @@ dependencies = [
  "metis",
  "petgraph",
  "quizx",
+ "rand",
  "vertex-cover",
 ]
 

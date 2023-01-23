@@ -1,8 +1,9 @@
 use petgraph as px;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone)]
 pub struct BiGraph<N, E> {
-    pub graph: px::graph::UnGraph<N, E>,
+    pub graph: px::stable_graph::StableUnGraph<N, E>,
     pub left: Vec<px::graph::NodeIndex>,
     pub right: Vec<px::graph::NodeIndex>,
 }
