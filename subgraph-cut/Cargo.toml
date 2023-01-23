@@ -1,0 +1,12 @@
+[package]
+name = "subgraph-cut"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+petgraph = "0.6"
+vertex-cover = { path = "../vertex-cover" }
+metis = { path = "../metis-rs" }
+quizx ={ git = "https://github.com/Quantomatic/quizx.git"}
