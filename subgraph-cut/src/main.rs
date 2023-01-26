@@ -1,7 +1,7 @@
 
 use std::collections::HashMap;
 use petgraph as px;
-use quizx::{vec_graph::Graph, hash_graph::GraphLike, circuit::Circuit};
+use quizx::{linalg::Mat2, vec_graph::Graph, hash_graph::GraphLike, circuit::Circuit};
 
 mod anneal;
 mod graph_to_matrix;
@@ -135,6 +135,59 @@ fn main() {
 
 }
 
+fn rank_decomposition(m: &Mat2) -> (Mat2, Mat2) {
+    let mut r = m.clone();
+    r.gauss_x(true, m.num_cols(), &mut ());
+
+    let mut pivots = Vec::new();
+    let mut row = 0;
+    let mut col = 0;
+    while row < r.num_rows() && col < r.num_cols() {
+        if r[(row, col)] != 0 {
+            pivots.push(col);
+            row += 1;
+        }
+        col += 1;
+    }
+
+    let mut c = Mat2::new(vec![vec![0; pivots.len()]; m.num_rows()]);
+    for (i, p) in pivots.into_iter().enumerate() {
+        for j in 0..m.num_rows() {
+            c[(j, i)] = m[(j, p)];
+        }
+    }
+
+    let nonzero = (0..r.num_rows())
+        .filter(|&i| (0..r.num_cols()).any(|j| r[(i, j)] != 0))
+        .collect::<Vec<_>>();
+
+    let mut f = Mat2::new(vec![vec![0; m.num_cols()]; nonzero.len()]);
+    for (i, p) in nonzero.into_iter().enumerate() {
+        for j in 0..m.num_cols() {
+            f[(i, j)] = r[(p, j)];
+        }
+    }
+
+    (c, f)
+}
+
+#[test]
+fn rank_decomposition_test() {
+    for _ in 0..1000 {
+        let mut m = Mat2::new(vec![vec![0; 10]; 10]);
+        for i in 0..10 {
+            for j in 0..10 {
+                m[(i, j)] = (rand::random::<f32>() < 0.2) as u8;
+            }
+        }
+
+        let (a, b) = rank_decomposition(&m);
+        let k = m.rank();
+        assert_eq!(a.num_cols(), k);
+        assert_eq!(b.num_rows(), k);
+        assert_eq!(a * b, m);
+    }
+}
 
 fn quizx_to_petgraph(g: &Graph) -> px::stable_graph::StableUnGraph<(), ()> {
     let vmapping = g.vertices().scan(0, |i, s| { *i += 1; Some((s, *i - 1)) }).collect::<HashMap<_,_>>();
