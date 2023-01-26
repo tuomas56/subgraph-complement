@@ -98,7 +98,7 @@ impl<R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<R, T> {
     }
 
     fn fitness(&self) -> usize {
-        self.graph.min_vertex_cover().len() * self.graph.graph.edge_count()
+        self.graph.min_vertex_cover().len() * crossing_edges(&self.graph)//self.graph.graph.edge_count()
     }
 
     pub fn run(&mut self, quiet: bool) {
@@ -122,4 +122,22 @@ impl<R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<R, T> {
             );
         }
     }
+}
+
+
+pub fn crossing_edges(graph: &vertex_cover::BiGraph<(), ()>)-> usize{
+    
+    let edges = graph.graph.edge_indices();
+    let mut crossing_count = 0;
+
+    for e in edges{
+        let (a,b) = graph.graph.edge_endpoints(e).unwrap();
+        if  (graph.left.contains(&a) && graph.right.contains(&b)) || (graph.left.contains(&b) && graph.right.contains(&a)) {
+            crossing_count +=1;
+        }
+    }
+
+    crossing_count
+
+
 }
