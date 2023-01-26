@@ -557,6 +557,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "petgraph-gen"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d83bcf72cdb33a6aa1f0865ae3ae7c34ec7eba52042262d53c2bb441276a0940"
+dependencies = [
+ "petgraph",
+ "rand",
+ "rustc-hash",
+]
+
+[[package]]
 name = "phf_shared"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -788,6 +799,7 @@ version = "0.1.0"
 dependencies = [
  "metis",
  "petgraph",
+ "petgraph-gen",
  "quizx",
  "rand",
  "vertex-cover",

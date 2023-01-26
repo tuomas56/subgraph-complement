@@ -4,6 +4,7 @@ use petgraph as px;
 use quizx::{vec_graph::Graph, hash_graph::GraphLike, circuit::Circuit};
 
 mod anneal;
+mod graph_to_matrix;
 
 fn main() {
     //testing vertex separator of zx-diagram
@@ -40,7 +41,6 @@ fn main() {
 
     //make sure the cut will be added to the smallest componnent
     if sep.left.len() < sep.right.len(){
-        println!("hello");
         let temp = sep.right;
         sep.right = sep.left;
         sep.left = temp;

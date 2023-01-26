@@ -11,3 +11,4 @@ vertex-cover = { path = "../vertex-cover" }
 metis = { path = "../metis-rs" }
 quizx = { git = "https://github.com/Quantomatic/quizx.git" }
 rand = "0.8.5"
+petgraph-gen = "0.1.3"
