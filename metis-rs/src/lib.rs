@@ -8,6 +8,10 @@ pub trait GraphLike {
     fn has_edge(&self, a: Self::Vertex, b: Self::Vertex) -> bool;
 }
 
+pub trait GraphLikeWeighted: GraphLike {
+    fn vertex_weight(&self, v: Self::Vertex) -> usize;
+}
+
 #[cfg(feature = "petgraph")]
 impl<N, E, Ty: petgraph::EdgeType> GraphLike for petgraph::Graph<N, E, Ty> {
     type Vertex = petgraph::graph::NodeIndex;
@@ -34,17 +38,33 @@ impl<N, E, Ty: petgraph::EdgeType> GraphLike for petgraph::stable_graph::StableG
     }
 }
 
+#[cfg(feature = "petgraph")]
+impl<N: Clone + Into<usize>, E, Ty: petgraph::EdgeType> GraphLikeWeighted for petgraph::Graph<N, E, Ty> {
+    fn vertex_weight(&self, v: Self::Vertex) -> usize {
+        self.node_weight(v).unwrap().clone().into()
+    }
+}
+
+#[cfg(feature = "petgraph")]
+impl<N: Clone + Into<usize>, E, Ty: petgraph::EdgeType> GraphLikeWeighted for petgraph::stable_graph::StableGraph<N, E, Ty> {
+    fn vertex_weight(&self, v: Self::Vertex) -> usize {
+        self.node_weight(v).unwrap().clone().into()
+    }
+}
+
 pub struct Graph<G: GraphLike> {
     map: Vec<G::Vertex>,
     xadj: Vec<sys::idx_t>,
     adjncy: Vec<sys::idx_t>,
+    vwgt: Vec<sys::idx_t>,
     nvtxs: sys::idx_t
 }
 
-impl<G: GraphLike> Graph<G> {
-    pub fn new(graph: &G) -> Self {
+impl<G: GraphLikeWeighted> Graph<G> {
+    pub fn new_weighted(graph: &G) -> Self {
         let map: Vec<_> = graph.vertices();
         let nvtxs = map.len() as sys::idx_t;
+        let mut vwgt = Vec::new();
         let mut xadj = vec![0];
         let mut adjncy = Vec::new();
         
@@ -56,9 +76,32 @@ impl<G: GraphLike> Graph<G> {
             }
             
             xadj.push(adjncy.len() as sys::idx_t);
+            vwgt.push(graph.vertex_weight(a.clone()) as sys::idx_t)
         }
 
-        Graph { map, xadj, adjncy, nvtxs }
+        Graph { map, xadj, adjncy, vwgt, nvtxs }
+    }
+}
+
+impl<G: GraphLike> Graph<G> {
+    pub fn new(graph: &G) -> Self {
+        let map: Vec<_> = graph.vertices();
+        let nvtxs = map.len() as sys::idx_t;
+        let vwgt = vec![1; nvtxs as usize];
+        let mut xadj = vec![0];
+        let mut adjncy = Vec::new();
+        
+        for a in &map {
+            for (j, b) in map.iter().enumerate() {
+                if graph.has_edge(a.clone(), b.clone()) || graph.has_edge(b.clone(), a.clone()) {
+                    adjncy.push(j as sys::idx_t);
+                }
+            }
+            
+            xadj.push(adjncy.len() as sys::idx_t);
+        } 
+
+        Graph { map, xadj, adjncy, vwgt, nvtxs }
     }
 
     pub fn vertex_separator(&self, options: &Options) -> Result<VertexSeparator<G>, Error> {
@@ -69,7 +112,7 @@ impl<G: GraphLike> Graph<G> {
                 &self.nvtxs as *const _ as *mut _,
                 self.xadj.as_ptr() as *mut _,
                 self.adjncy.as_ptr() as *mut _,
-                std::ptr::null_mut(),
+                self.vwgt.as_ptr() as *mut _,
                 options.options.as_ptr() as *mut _, 
                 &mut sepsize as *mut _,
                 part.as_mut_ptr()
