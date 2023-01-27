@@ -1,3 +1,5 @@
+use std::clone;
+
 #[allow(nonstandard_style)] 
 pub mod sys;
 
@@ -101,7 +103,7 @@ impl<G: GraphLike> Graph<G> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct VertexSeparator<G: GraphLike> {
     pub left: Vec<G::Vertex>,
     pub right: Vec<G::Vertex>,

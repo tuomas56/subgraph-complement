@@ -2,6 +2,17 @@ use std::collections::HashSet;
 use rand::seq::IteratorRandom;
 use petgraph as px;
 
+use std::cmp;
+use metis::VertexSeparator;
+use px::stable_graph::{NodeIndex,StableUnGraph};
+use quizx::{vec_graph::Graph, hash_graph::GraphLike};
+use roots::{find_root_brent, SimpleConvergency};
+
+use crate::{sep_to_bigraph, get_subgraphs_complement_cover};
+
+
+
+
 #[derive(Debug, Clone)]
 pub struct GeometricSeries {
     current: f32,
@@ -34,21 +45,27 @@ impl Iterator for GeometricSeries {
 }
 
 pub struct ComplementFinder<R: rand::Rng, T: Iterator<Item = f32>> {
-    pub graph: vertex_cover::BiGraph<(), ()>,
+    pub graph: StableUnGraph<(), ()>,
     pub current: HashSet<px::graph::NodeIndex>,
-    pub fitness: usize,
+    pub fitness: f32,
     rng: R,
-    temperature: T
+    temperature: T,
+    depth: usize
 }
 
 impl<R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<R, T> {
-    pub fn new(graph: &vertex_cover::BiGraph<(), ()>, rng: R, temperature: T) -> Self {
+    pub fn new(graph: &StableUnGraph<(),()>, mut rng: R, temperature: T,depth:usize) -> Self {
+        let complement = graph.node_indices()
+                .choose_multiple(&mut rng, graph.node_count() / (2*depth));
         let mut finder = ComplementFinder {
             graph: graph.clone(),
             current: HashSet::new(),
-            fitness: 0,
-            rng, temperature
+            fitness: 0.0,
+            rng, temperature,depth
         };
+        for c in complement {
+            finder.toggle_node(c);
+        }
         finder.fitness = finder.fitness();
         finder
     }
@@ -61,10 +78,10 @@ impl<R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<R, T> {
                 continue
             }
 
-            if let Some(e) = self.graph.graph.find_edge(node, other) {
-                self.graph.graph.remove_edge(e);
+            if let Some(e) = self.graph.find_edge(node, other) {
+                self.graph.remove_edge(e);
             } else {
-                self.graph.graph.add_edge(node, other, ());
+                self.graph.add_edge(node, other, ());
             }
         }
 
@@ -76,7 +93,7 @@ impl<R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<R, T> {
     }
 
     fn step(&mut self, temp: f32) {
-        let node = self.graph.graph
+        let node = self.graph
             .node_indices()
             .choose(&mut self.rng)
             .unwrap();
@@ -97,8 +114,18 @@ impl<R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<R, T> {
         }
     }
 
-    fn fitness(&self) -> usize {
-        self.graph.min_vertex_cover().len() * crossing_edges(&self.graph)//self.graph.graph.edge_count()
+    fn fitness(&self) -> f32 {
+        let sep = metis::Graph::new(&self.graph)
+        .vertex_separator(&metis::Options::default()
+            .max_imbalance(10))
+        .unwrap();
+
+        let bg = sep_to_bigraph(&self.graph,&sep);
+
+        let sgcs = get_subgraphs_complement_cover(&bg);
+
+        alpha_subgraph_complements(&self.graph,&sep,&sgcs,1)
+        
     }
 
     pub fn run(&mut self, quiet: bool) {
@@ -141,3 +168,22 @@ pub fn crossing_edges(graph: &vertex_cover::BiGraph<(), ()>)-> usize{
 
 
 }
+
+fn alpha_subgraph_complements(g:&StableUnGraph<(),()>,sep :& VertexSeparator<StableUnGraph<(),()>>, subgraph_complements: &Vec<Vec<NodeIndex>>,nb_initials_subgraph_complements:usize) -> f32{
+    // TODO : Take tcounts into account!
+    
+        let num_diag = subgraph_complements.len() + nb_initials_subgraph_complements;
+        let n = g.node_count();
+        let (d1,d2) = (n-cmp::min(sep.left.len(),sep.right.len())+ sep.cut.len(), n-cmp::max(sep.left.len(),sep.right.len()) );
+        let (a,b) = (cmp::min(d1,d2),cmp::max(d1,d2));
+    
+    
+        let f = |x:f32| {
+            a as f32 * x.ln() - (num_diag as f32)/1.442695 + (1.0 +x.powi(a as i32 -b as i32)).ln_1p() 
+            // the constant is lg(e)
+        };
+
+        let t = find_root_brent(1.0, 2.0, f, &mut SimpleConvergency{eps:0.001,max_iter:100}).unwrap();
+        t.log2()
+    }
+    
