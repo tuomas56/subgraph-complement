@@ -570,6 +570,7 @@ dependencies = [
 [[package]]
 name = "quizx"
 version = "0.1.0"
+source = "git+https://github.com/Quantomatic/quizx.git#e37b280b810094254c82acc53934b1030e8f8f14"
 dependencies = [
  "approx",
  "itertools",

@@ -1,5 +1,3 @@
-use std::clone;
-
 #[allow(nonstandard_style)] 
 pub mod sys;
 

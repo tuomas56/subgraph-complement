@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8.5"
-zx = { package = "quizx", path = "../quizx/quizx" }
+zx = { package = "quizx", git = "https://github.com/Quantomatic/quizx.git" }

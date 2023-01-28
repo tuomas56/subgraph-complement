@@ -7,9 +7,10 @@ edition = "2021"
 
 [dependencies]
 petgraph = "0.6"
-vertex-cover = { path = "../vertex-cover" }
 metis = { path = "../metis-rs" }
 quizx = { git = "https://github.com/Quantomatic/quizx.git" }
 rand = "0.8.5"
 petgraph-gen = "0.1.3"
 roots = "0.0.8"
+rs-graph = "0.20"
+ordered-float = "3.4"
