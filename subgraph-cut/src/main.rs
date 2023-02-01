@@ -14,14 +14,15 @@ mod anneal;
 mod bigraph;
 mod rank;
 
-trait ToPetgraph {
+trait GraphUtils {
     type Node;
     type Edge;
 
     fn to_petgraph(&self) -> StableUnGraph<Self::Node, Self::Edge>;
+    fn to_qasm(&self) -> String;
 }
 
-impl<G: quizx::graph::GraphLike> ToPetgraph for G {
+impl<G: quizx::graph::GraphLike> GraphUtils for G {
     type Node = ();
     type Edge = ();
 
@@ -39,6 +40,34 @@ impl<G: quizx::graph::GraphLike> ToPetgraph for G {
             .collect::<Vec<_>>();
         let graph = px::stable_graph::StableUnGraph::<(), ()>::from_edges(&edges);
         graph
+    }
+
+    fn to_qasm(&self) -> String {
+        let mut g = self.clone();
+        g.x_to_z();
+        quizx::simplify::spider_simp(&mut g);
+
+        let indices = g.vertices()
+            .enumerate()
+            .map(|(i, j)| (j, i))
+            .collect::<HashMap<_, _>>();
+        
+        let mut c = quizx::circuit::Circuit::new(indices.len());
+        
+        for v in g.vertices() {
+            c.add_gate("h", vec![indices[&v]]);
+            c.add_gate_with_phase("rz", vec![indices[&v]], g.phase(v));
+        }
+
+        for (a, b, _) in g.edges() {
+            c.add_gate("cz", vec![indices[&a], indices[&b]])
+        }
+
+        for v in g.vertices() {
+            c.add_gate("h", vec![indices[&v]]);
+        }
+
+        c.to_qasm()
     }
 }
 
