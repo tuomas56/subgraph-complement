@@ -201,6 +201,27 @@ impl<N: Clone, E: Clone> BiGraph<N, E> {
         let sc: Vec<_> = (0..rank).map(|x| (getcol(&c, x), getrow(&r, x))).collect();
 
         let mut sgcs: Vec<Vec<NodeIndex>> = vec![];
+
+        // if can be done by vertex cuts
+        if rank == self.right.len()  {
+            for &v in &self.right{
+                let mut sgc: Vec<NodeIndex> = self.graph.neighbors(v).into_iter().collect();
+                sgc.push(v);
+                sgcs.push(sgc)
+            }
+            return sgcs;
+
+        } else if rank == self.left.len() {
+            for &v in &self.left{
+                let mut sgc: Vec<NodeIndex> = self.graph.neighbors(v).into_iter().collect();
+                sgc.push(v);
+                sgcs.push(sgc)
+            }
+            return sgcs;
+            
+        };
+
+
         for sgci in sc {
             let mut sgc: Vec<NodeIndex> = vec![];
 
