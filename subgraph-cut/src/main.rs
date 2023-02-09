@@ -120,7 +120,7 @@ fn main() {
             GeometricSeries::new(0.1, 0.001, 10000),
             i,
             350,
-            40,
+            1000,
         );
         finder.run(false);
         let subgraph = finder.solution_found().into_iter().map(|x| x.index()).collect();
@@ -138,7 +138,7 @@ fn main() {
             GeometricSeries::new(0.1, 0.001, 10000),
             i,
             350,
-            40,
+            1000,
         );
         finder.run(false);
         let subgraph = finder.solution_found().into_iter().map(|x| x.index()).collect();
