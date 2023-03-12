@@ -1,6 +1,6 @@
 use std::{collections::{HashSet, HashMap}, path::PathBuf};
 use rand::seq::IteratorRandom;
-use zx::graph::{GraphLike, EType};
+use zx::graph::{GraphLike, EType, VType};
 use serde::Serialize;
 use clap::Parser;
 
@@ -38,18 +38,21 @@ impl Iterator for GeometricSeries {
 pub struct ComplementFinder<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> {
     pub graph: G,
     pub current: HashSet<usize>,
-    pub fitness: usize,
+    pub fitness: f32,
     rng: R,
-    temperature: T
+    temperature: T,
+    cut: bool,
+    alpha: f32,
+    beta: f32
 }
 
 impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R, T> {
-    pub fn new(graph: &G, rng: R, temperature: T) -> Self {
+    pub fn new(graph: &G, rng: R, temperature: T, cut: bool, alpha: f32, beta: f32) -> Self {
         let mut finder = ComplementFinder {
             graph: graph.clone(),
             current: HashSet::new(),
-            fitness: 0,
-            rng, temperature
+            fitness: 0.0,
+            rng, temperature, cut, alpha, beta
         };
         finder.fitness = finder.fitness();
         finder
@@ -73,8 +76,14 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
         }
     }
 
-    fn fitness(&self) -> usize {
-        self.graph.num_edges()
+    fn fitness(&self) -> f32 {
+        let (edges, vertices) = if self.cut {
+            (self.graph.num_edges(), self.graph.num_vertices())
+        } else {
+            (self.graph.num_edges() + self.current.len(), self.graph.num_vertices() + (self.current.len() > 0) as usize)
+        };
+
+        self.alpha * vertices as f32 + self.beta * edges as f32
     }
 
     fn step(&mut self, temp: f32) {
@@ -103,7 +112,7 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
         let mut step = 0;
         let original = self.fitness;
         while let Some(temp) = self.temperature.next() {
-            if !quiet && step % 10000 == 0 {
+            if !quiet && step % 100000 == 0 {
                 println!(
                     "    step = {:?}, temp = {:.2?}, fitness = {:?}, ratio = {:.2?}", 
                     step, temp, self.fitness, self.fitness as f32 / original as f32
@@ -121,15 +130,29 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
         }
     }
 
-    pub fn terms(&self) -> (G, G) {
-        let mut a = self.graph.clone();
-        let mut b = self.graph.clone();
-        for &n in &self.current {
-            a.add_to_phase(n, (1, 2).into());
-            b.add_to_phase(n, (-1, 2).into());
+    pub fn terms(&self) -> Vec<G> {
+        if self.current.is_empty() {
+            return vec![self.graph.clone()]
         }
-        b.scalar_mut().mul_phase((1, 2).into());
-        (a, b)
+
+        if self.cut {
+            let mut a = self.graph.clone();
+            let mut b = self.graph.clone();
+            for &n in &self.current {
+                a.add_to_phase(n, (1, 2).into());
+                b.add_to_phase(n, (-1, 2).into());
+            }
+            b.scalar_mut().mul_phase((1, 2).into());
+            vec![a, b]
+        } else {
+            let mut a = self.graph.clone();
+            let z = a.add_vertex_with_phase(VType::Z, (1, 2).into());
+            for &n in &self.current {
+                a.add_to_phase(n, (1, 2).into());
+                a.add_edge_smart(n, z, EType::H);
+            }
+            vec![a]
+        }
     }
 }
 
@@ -172,7 +195,19 @@ struct Args {
     #[clap(short = 'M', long, default_value_t = 3000.0, help = "Starting temperature for annealing")]
     max_temp: f32,
     #[clap(short = 'm', long, default_value_t = 0.1, help = "End temperature for annealing")]
-    min_temp: f32
+    min_temp: f32,
+    #[clap(short, long, help = "Don't cut the complement vertices")]
+    no_cut: bool,
+    #[clap(short, long, help = "Keep sparsifying forever until cost stops decreasing")]
+    infinite: bool,
+    #[clap(short, long, default_value_t = 0.0, help = "Weight of vertex count in fitness function")]
+    alpha: f32,
+    #[clap(short, long, default_value_t = 1.0, help = "Weight of edge count in fitness function")]
+    beta: f32
+}
+
+fn cost_model(g: &impl GraphLike, alpha: f32, beta: f32) -> f32 {
+    g.num_vertices() as f32 * alpha + g.num_edges() as f32 * beta
 }
 
 fn main() {
@@ -187,31 +222,57 @@ fn main() {
 
         zx::simplify::full_simp(&mut g);
         let density = 2.0 * g.num_edges() as f32 / (g.num_vertices() as f32 * (g.num_vertices() as f32 - 1.0));
-        println!("  vertices = {:?} edges = {:?} density = {:?}", g.num_vertices(), g.num_edges(), density);
+        println!("  vertices = {:?} edges = {:?} density = {:?} cost = {:?}", g.num_vertices(), g.num_edges(), density, cost_model(&g, args.alpha, args.beta));
 
         let mut rng = rand::thread_rng();
         let mut a = g.clone();
         let mut overall_ratio = 1.0;
-        for _ in 0..args.rounds {
+        let mut do_round = || {
             let mut finder = ComplementFinder::new(
-                &a, &mut rng, GeometricSeries::new(args.max_temp, args.min_temp, args.steps)
+                &a, &mut rng, 
+                GeometricSeries::new(args.max_temp, args.min_temp, args.steps), 
+                !args.no_cut, args.alpha, args.beta
             );
             finder.run(false);
-            let (aa, _) = finder.terms();
-            let ratio = aa.num_edges() as f32 / a.num_edges() as f32;
-            a = aa;
+            let aa = finder.terms().pop().unwrap();
+            let ratio = cost_model(&aa, args.alpha, args.beta) / cost_model(&a, args.alpha, args.beta);
+            let done = cost_model(&aa, args.alpha, args.beta) >= cost_model(&a, args.alpha, args.beta);
+            if !done { a = aa };
             let density = 2.0 * a.num_edges() as f32 / (a.num_vertices() as f32 * (a.num_vertices() as f32 - 1.0));
-            println!("  vertices = {:?} edges = {:?} density = {:?}", a.num_vertices(), a.num_edges(), density);  
+            println!("  vertices = {:?} edges = {:?} density = {:?} cost = {:?}", a.num_vertices(), a.num_edges(), density, cost_model(&a, args.alpha, args.beta));  
             overall_ratio *= ratio;
+            done
+        };
+
+        let mut rounds = 0;
+        if args.infinite {
+            loop {
+                if do_round() {
+                    break
+                } else {
+                    rounds += 1;
+                }
+            }
+        } else {
+            for _ in 0..args.rounds {
+                do_round();
+                rounds += 1;
+            }
         }
 
-        println!("  overall ratio: {}", overall_ratio);
+        println!("  overall cost ratio: {}", overall_ratio);
         
         let path = PathBuf::from(path);
-        let aname = path.with_file_name(format!("{}-sparsified-{}.json", path.file_stem().unwrap().to_string_lossy(), args.rounds));
+        let aname = path.with_file_name(if args.infinite {
+            format!("{}-sparsified-inf.json", path.file_stem().unwrap().to_string_lossy())
+        } else {
+            format!("{}-sparsified-{}.json", path.file_stem().unwrap().to_string_lossy(), args.rounds)
+        }); 
         let gname = path.with_file_name(format!("{}-simplified.json", path.file_stem().unwrap().to_string_lossy()));
         let mut f = std::fs::File::create(&aname).unwrap();
-        serde_json::to_writer(&mut f, &JsonGraph::new(&a, 1 << args.rounds)).unwrap();
+        serde_json::to_writer(&mut f, &JsonGraph::new(&a, if args.no_cut { 1 } else {
+            1 << rounds
+        })).unwrap();
         let mut f = std::fs::File::create(&gname).unwrap();
         serde_json::to_writer(&mut f, &JsonGraph::new(&g, 0)).unwrap();
         println!("  wrote: `{}`", aname.display());
