@@ -35,9 +35,9 @@ impl Iterator for GeometricSeries {
     }
 }
 
-pub struct ComplementFinder<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> {
+pub struct ComplementSetFinder<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> {
     pub graph: G,
-    pub current: HashSet<usize>,
+    pub sets: Vec<HashSet<usize>>,
     pub fitness: f32,
     rng: R,
     temperature: T,
@@ -46,11 +46,11 @@ pub struct ComplementFinder<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>>
     beta: f32
 }
 
-impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R, T> {
-    pub fn new(graph: &G, rng: R, temperature: T, cut: bool, alpha: f32, beta: f32) -> Self {
-        let mut finder = ComplementFinder {
+impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementSetFinder<G, R, T> {
+    pub fn new(graph: &G, rng: R, temperature: T, cut: bool, alpha: f32, beta: f32, count: usize) -> Self {
+        let mut finder = ComplementSetFinder {
             graph: graph.clone(),
-            current: HashSet::new(),
+            sets: vec![HashSet::new(); count],
             fitness: 0.0,
             rng, temperature, cut, alpha, beta
         };
@@ -58,9 +58,9 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
         finder
     }
 
-    fn toggle_node(&mut self, node: usize) {
+    fn toggle_node(&mut self, node: usize, idx: usize) {
         let mut present = false;
-        for &other in &self.current {
+        for &other in &self.sets[idx] {
             if other == node {
                 present = true;
                 continue
@@ -70,9 +70,9 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
         }
 
         if !present {
-            self.current.insert(node);
+            self.sets[idx].insert(node);
         } else {
-            self.current.remove(&node);
+            self.sets[idx].remove(&node);
         }
     }
 
@@ -80,19 +80,23 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
         let (edges, vertices) = if self.cut {
             (self.graph.num_edges(), self.graph.num_vertices())
         } else {
-            (self.graph.num_edges() + self.current.len(), self.graph.num_vertices() + (self.current.len() > 0) as usize)
+            (
+                self.graph.num_edges() + self.sets.iter().map(|s| s.len()).sum::<usize>(), 
+                self.graph.num_vertices() + self.sets.iter().filter(|s| !s.is_empty()).count()
+            )
         };
 
         self.alpha * vertices as f32 + self.beta * edges as f32
     }
 
     fn step(&mut self, temp: f32) {
+        let idx = self.rng.gen_range(0..self.sets.len());
         let node = self.graph
             .vertices()
             .choose(&mut self.rng)
             .unwrap();
 
-        self.toggle_node(node);
+        self.toggle_node(node, idx);
         let new_fitness = self.fitness();
 
         if new_fitness < self.fitness {
@@ -104,7 +108,7 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
         if self.rng.gen::<f32>() < prob {
             self.fitness = new_fitness;
         } else {
-            self.toggle_node(node);
+            self.toggle_node(node, idx);
         }
     }
 
@@ -131,26 +135,42 @@ impl<G: GraphLike, R: rand::Rng, T: Iterator<Item = f32>> ComplementFinder<G, R,
     }
 
     pub fn terms(&self) -> Vec<G> {
-        if self.current.is_empty() {
-            return vec![self.graph.clone()]
-        }
-
         if self.cut {
-            let mut a = self.graph.clone();
-            let mut b = self.graph.clone();
-            for &n in &self.current {
-                a.add_to_phase(n, (1, 2).into());
-                b.add_to_phase(n, (-1, 2).into());
+            let mut terms = vec![self.graph.clone()];
+            for set in &self.sets {
+                if set.is_empty() {
+                    continue
+                }
+
+                let mut nterms = Vec::new();
+                for t in &terms {
+                    let mut a = t.clone();
+                    let mut b = t.clone();
+                    for &n in set {
+                        a.add_to_phase(n, (1, 2).into());
+                        b.add_to_phase(n, (-1, 2).into());
+                    }
+                    b.scalar_mut().mul_phase((1, 2).into());
+                    nterms.push(a);
+                    nterms.push(b);
+                }
+                terms = nterms;
             }
-            b.scalar_mut().mul_phase((1, 2).into());
-            vec![a, b]
+
+            terms
         } else {
             let mut a = self.graph.clone();
-            let z = a.add_vertex_with_phase(VType::Z, (1, 2).into());
-            for &n in &self.current {
-                a.add_to_phase(n, (1, 2).into());
-                a.add_edge_smart(n, z, EType::H);
+
+            for set in &self.sets {
+                if !set.is_empty() {
+                    let z = a.add_vertex_with_phase(VType::Z, (1, 2).into());
+                    for &n in set {
+                        a.add_to_phase(n, (1, 2).into());
+                        a.add_edge_smart(n, z, EType::H);
+                    }
+                }
             }
+            
             vec![a]
         }
     }
@@ -203,7 +223,9 @@ struct Args {
     #[clap(short, long, default_value_t = 0.0, help = "Weight of vertex count in fitness function")]
     alpha: f32,
     #[clap(short, long, default_value_t = 1.0, help = "Weight of edge count in fitness function")]
-    beta: f32
+    beta: f32,
+    #[clap(short, long, default_value_t = 1, help = "How many complements to search for at each round")]
+    count: usize
 }
 
 fn cost_model(g: &impl GraphLike, alpha: f32, beta: f32) -> f32 {
@@ -228,35 +250,40 @@ fn main() {
         let mut a = g.clone();
         let mut overall_ratio = 1.0;
         let mut do_round = || {
-            let mut finder = ComplementFinder::new(
+            let mut finder = ComplementSetFinder::new(
                 &a, &mut rng, 
                 GeometricSeries::new(args.max_temp, args.min_temp, args.steps), 
-                !args.no_cut, args.alpha, args.beta
+                !args.no_cut, args.alpha, args.beta, args.count
             );
             finder.run(false);
-            let aa = finder.terms().pop().unwrap();
+            let mut terms = finder.terms();
+            let num_terms = terms.len();
+            let aa = terms.pop().unwrap();
             let ratio = cost_model(&aa, args.alpha, args.beta) / cost_model(&a, args.alpha, args.beta);
             let done = cost_model(&aa, args.alpha, args.beta) >= cost_model(&a, args.alpha, args.beta);
-            if !done { a = aa };
+            if !done { 
+                a = aa;
+                overall_ratio *= ratio;
+            }
             let density = 2.0 * a.num_edges() as f32 / (a.num_vertices() as f32 * (a.num_vertices() as f32 - 1.0));
             println!("  vertices = {:?} edges = {:?} density = {:?} cost = {:?}", a.num_vertices(), a.num_edges(), density, cost_model(&a, args.alpha, args.beta));  
-            overall_ratio *= ratio;
-            done
+            (done, num_terms)
         };
 
-        let mut rounds = 0;
+        let mut terms = 1;
         if args.infinite {
             loop {
-                if do_round() {
+                let (done, num_terms) = do_round();
+                if done {
                     break
                 } else {
-                    rounds += 1;
+                    terms *= num_terms;
                 }
             }
         } else {
             for _ in 0..args.rounds {
-                do_round();
-                rounds += 1;
+                let (_, num_terms) = do_round();
+                terms *= num_terms;
             }
         }
 
@@ -270,9 +297,7 @@ fn main() {
         }); 
         let gname = path.with_file_name(format!("{}-simplified.json", path.file_stem().unwrap().to_string_lossy()));
         let mut f = std::fs::File::create(&aname).unwrap();
-        serde_json::to_writer(&mut f, &JsonGraph::new(&a, if args.no_cut { 1 } else {
-            1 << rounds
-        })).unwrap();
+        serde_json::to_writer(&mut f, &JsonGraph::new(&a, terms)).unwrap();
         let mut f = std::fs::File::create(&gname).unwrap();
         serde_json::to_writer(&mut f, &JsonGraph::new(&g, 0)).unwrap();
         println!("  wrote: `{}`", aname.display());
